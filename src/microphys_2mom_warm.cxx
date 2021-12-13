@@ -551,6 +551,13 @@ Microphys_2mom_warm<TF>::Microphys_2mom_warm(Master& masterin, Grid<TF>& gridin,
     // Load the viscosity for both fields.
     fields.sp.at("qr")->visc = inputin.get_item<TF>("fields", "svisc", "qr");
     fields.sp.at("nr")->visc = inputin.get_item<TF>("fields", "svisc", "nr");
+
+    fields.init_diagnostic_field("auto_qtt" , "Autoconversion tendency qt",  "kg kg-1 s-1", group_name, gd.sloc);
+    fields.init_diagnostic_field("auto_thlt" , "Autoconversion tendency thl", "K s-1", group_name, gd.sloc);
+    fields.init_diagnostic_field("accr_qtt" , "Accretion tendency qt",  "kg kg-1 s-1", group_name, gd.sloc);
+    fields.init_diagnostic_field("accr_thlt" , "Accretion tendency thl", "K s-1", group_name, gd.sloc);
+    fields.init_diagnostic_field("evap_qtt" , "Evaporation tendency qt",  "kg kg-1 s-1", group_name, gd.sloc);
+    fields.init_diagnostic_field("evap_thlt" , "Evaporation tendency thl", "K s-1", group_name, gd.sloc);
 }
 
 template<typename TF>
@@ -570,6 +577,7 @@ template<typename TF>
 void Microphys_2mom_warm<TF>::create(Input& inputin, Netcdf_handle& input_nc, Stats<TF>& stats, Cross<TF>& cross, Dump<TF>& dump)
 {
     const std::string group_name = "thermo";
+    auto& gd = grid.get_grid_data();
 
     // BvS: for now I have left the init of statistics and cross-sections here
     // If this gets out of hand, move initialisation to separate function like in e.g. thermo_moist
@@ -796,55 +804,68 @@ void Microphys_2mom_warm<TF>::exec_stats(Stats<TF>& stats, Thermo<TF>& thermo, c
         // Get 4 tmp fields for all tendencies (qrt, nrt, thlt, qtt) :-(
         auto qrt  = fields.get_tmp();
         auto nrt  = fields.get_tmp();
-        auto thlt = fields.get_tmp();
-        auto qtt  = fields.get_tmp();
+        //auto thlt = fields.get_tmp();
+        //auto qtt  = fields.get_tmp();
         qrt->loc  = gd.sloc;
         nrt->loc  = gd.sloc;
-        thlt->loc = gd.sloc;
-        qtt->loc  = gd.sloc;
+        //thlt->loc = gd.sloc;
+        //qtt->loc  = gd.sloc;
 
         // Calculate tendencies
         // Autoconversion; formation of rain drop by coagulating cloud droplets
         // -------------------------
         zero_field(qrt->fld.data(),  gd.ncells);
         zero_field(nrt->fld.data(),  gd.ncells);
-        zero_field(thlt->fld.data(), gd.ncells);
-        zero_field(qtt->fld.data(),  gd.ncells);
+        //zero_field(thlt->fld.data(), gd.ncells);
+        //zero_field(qtt->fld.data(),  gd.ncells);
+        zero_field(fields.sd.at("auto_thlt")->fld.data(), gd.ncells);
+        zero_field(fields.sd.at("auto_qtt")->fld.data(),  gd.ncells);
 
-        mp3d::autoconversion(qrt->fld.data(), nrt->fld.data(), qtt->fld.data(), thlt->fld.data(),
+        //mp3d::autoconversion(qrt->fld.data(), nrt->fld.data(), qtt->fld.data(), thlt->fld.data(),
+        mp3d::autoconversion(qrt->fld.data(), nrt->fld.data(), fields.sd.at("auto_qtt")->fld.data(), fields.sd.at("auto_thlt")->fld.data(),
                              fields.sp.at("qr")->fld.data(), ql->fld.data(), fields.rhoref.data(), exner.data(), Nc0<TF>,
                              gd.istart, gd.jstart, gd.kstart,
                              gd.iend,   gd.jend,   gd.kend,
                              gd.icells, gd.ijcells);
 
+
         stats.calc_stats("auto_qrt" , *qrt , no_offset, no_threshold);
         stats.calc_stats("auto_nrt" , *nrt , no_offset, no_threshold);
-        stats.calc_stats("auto_thlt", *thlt, no_offset, no_threshold);
-        stats.calc_stats("auto_qtt" , *qtt , no_offset, no_threshold);
+        //stats.calc_stats("auto_thlt", *thlt, no_offset, no_threshold);
+        //stats.calc_stats("auto_qtt" , *qtt , no_offset, no_threshold);
+        stats.calc_stats("auto_thlt", *fields.sd.at("auto_thlt"), no_offset, no_threshold);
+        stats.calc_stats("auto_qtt" , *fields.sd.at("auto_qtt") , no_offset, no_threshold);
 
         // Accretion; growth of raindrops collecting cloud droplets
         // -------------------------
         zero_field(qrt->fld.data(),  gd.ncells);
-        zero_field(thlt->fld.data(), gd.ncells);
-        zero_field(qtt->fld.data(),  gd.ncells);
+        //zero_field(thlt->fld.data(), gd.ncells);
+        //zero_field(qtt->fld.data(),  gd.ncells);
+        zero_field(fields.sd.at("accr_thlt")->fld.data(), gd.ncells);
+        zero_field(fields.sd.at("accr_qtt")->fld.data(),  gd.ncells);
 
-        mp3d::accretion(qrt->fld.data(), qtt->fld.data(), thlt->fld.data(),
+        //mp3d::accretion(qrt->fld.data(), qtt->fld.data(), thlt->fld.data(),
+        mp3d::accretion(qrt->fld.data(), fields.sd.at("accr_qtt")->fld.data(), fields.sd.at("accr_thlt")->fld.data(),
                         fields.sp.at("qr")->fld.data(), ql->fld.data(), fields.rhoref.data(), exner.data(),
                         gd.istart, gd.jstart, gd.kstart,
                         gd.iend,   gd.jend,   gd.kend,
                         gd.icells, gd.ijcells);
 
         stats.calc_stats("accr_qrt" , *qrt , no_offset, no_threshold);
-        stats.calc_stats("accr_thlt", *thlt, no_offset, no_threshold);
-        stats.calc_stats("accr_qtt" , *qtt , no_offset, no_threshold);
+        //stats.calc_stats("accr_thlt", *thlt, no_offset, no_threshold);
+        //stats.calc_stats("accr_qtt" , *qtt , no_offset, no_threshold);
+        stats.calc_stats("accr_thlt", *fields.sd.at("accr_thlt"), no_offset, no_threshold);
+        stats.calc_stats("accr_qtt" , *fields.sd.at("accr_qtt") , no_offset, no_threshold);
 
         // Rest of the microphysics is handled per XZ slice
         // Evaporation; evaporation of rain drops in unsaturated environment
         // -------------------------
         zero_field(qrt->fld.data(),  gd.ncells);
         zero_field(nrt->fld.data(),  gd.ncells);
-        zero_field(thlt->fld.data(), gd.ncells);
-        zero_field(qtt->fld.data(),  gd.ncells);
+        //zero_field(thlt->fld.data(), gd.ncells);
+        //zero_field(qtt->fld.data(),  gd.ncells);
+        zero_field(fields.sd.at("evap_thlt")->fld.data(), gd.ncells);
+        zero_field(fields.sd.at("evap_qtt")->fld.data(),  gd.ncells);
 
         for (int j=gd.jstart; j<gd.jend; ++j)
         {
@@ -852,7 +873,8 @@ void Microphys_2mom_warm<TF>::exec_stats(Stats<TF>& stats, Thermo<TF>& thermo, c
                                              fields.sp.at("qr")->fld.data(), fields.sp.at("nr")->fld.data(), fields.rhoref.data(),
                                              gd.istart, gd.iend, gd.kstart, gd.kend, gd.icells, gd.ijcells, j);
 
-            mp2d::evaporation(qrt->fld.data(), nrt->fld.data(),  qtt->fld.data(), thlt->fld.data(),
+            //mp2d::evaporation(qrt->fld.data(), nrt->fld.data(),  qtt->fld.data(), thlt->fld.data(),
+            mp2d::evaporation(qrt->fld.data(), nrt->fld.data(),  fields.sd.at("evap_qtt")->fld.data(), fields.sd.at("evap_thlt")->fld.data(),
                               fields.sp.at("qr")->fld.data(), fields.sp.at("nr")->fld.data(),  ql->fld.data(),
                               fields.sp.at("qt")->fld.data(), fields.sp.at("thl")->fld.data(), fields.rhoref.data(), exner.data(), p.data(),
                               rain_mass, rain_diam,
@@ -863,8 +885,10 @@ void Microphys_2mom_warm<TF>::exec_stats(Stats<TF>& stats, Thermo<TF>& thermo, c
 
         stats.calc_stats("evap_qrt" , *qrt , no_offset, no_threshold);
         stats.calc_stats("evap_nrt" , *nrt , no_offset, no_threshold);
-        stats.calc_stats("evap_thlt", *thlt, no_offset, no_threshold);
-        stats.calc_stats("evap_qtt" , *qtt , no_offset, no_threshold);
+        //stats.calc_stats("evap_thlt", *thlt, no_offset, no_threshold);
+        //stats.calc_stats("evap_qtt" , *qtt , no_offset, no_threshold);
+        stats.calc_stats("evap_thlt", *fields.sd.at("evap_thlt"), no_offset, no_threshold);
+        stats.calc_stats("evap_qtt" , *fields.sd.at("evap_qtt") , no_offset, no_threshold);
 
         // Self collection and breakup; growth of raindrops by mutual (rain-rain) coagulation, and breakup by collisions
         // -------------------------
@@ -915,8 +939,8 @@ void Microphys_2mom_warm<TF>::exec_stats(Stats<TF>& stats, Thermo<TF>& thermo, c
         fields.release_tmp(ql  );
         fields.release_tmp(qrt );
         fields.release_tmp(nrt );
-        fields.release_tmp(thlt);
-        fields.release_tmp(qtt );
+        //fields.release_tmp(thlt);
+        //fields.release_tmp(qtt );
     }
 }
 

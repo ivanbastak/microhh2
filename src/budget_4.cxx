@@ -30,6 +30,7 @@
 #include "finite_difference.h"
 #include "model.h"
 #include "thermo.h"
+#include "microphys.h"
 #include "diff.h"
 #include "advec.h"
 #include "force.h"
@@ -2695,8 +2696,8 @@ namespace
 template<typename TF>
 Budget_4<TF>::Budget_4(
         Master& masterin, Grid<TF>& gridin, Fields<TF>& fieldsin,
-        Thermo<TF>& thermoin, Diff<TF>& diffin, Advec<TF>& advecin, Force<TF>& forcein, Input& inputin) :
-    Budget<TF>(masterin, gridin, fieldsin, thermoin, diffin, advecin, forcein, inputin),
+        Thermo<TF>& thermoin, Microphys<TF>& microphysin, Diff<TF>& diffin, Advec<TF>& advecin, Force<TF>& forcein, Input& inputin) :
+    Budget<TF>(masterin, gridin, fieldsin, thermoin, microphysin, diffin, advecin, forcein, inputin),
     field3d_operators(masterin, gridin, fieldsin)
 {}
 

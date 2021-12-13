@@ -20,6 +20,7 @@
  * along with MicroHH.  If not, see <http://www.gnu.org/licenses/>.
  */
 #include <iostream>
+#include <iomanip>
 #include <string>
 #include <cstdio>
 #include <algorithm>
@@ -137,10 +138,11 @@ Model<TF>::Model(Master& masterin, int argc, char *argv[]) :
         dump      = std::make_shared<Dump  <TF>>(master, *grid, *fields, *input);
         cross     = std::make_shared<Cross <TF>>(master, *grid, *fields, *input);
 
-        budget    = Budget<TF>::factory(master, *grid, *fields, *thermo, *diff, *advec, *force, *stats, *input);
+        budget    = Budget<TF>::factory(master, *grid, *fields, *thermo,*microphys, *diff, *advec, *force, *stats, *input);
 
         // Parse the statistics masks
-        add_statistics_masks();
+        //add_statistics_masks();
+        add_statistics_masks(*grid,*input);
     }
     catch (std::exception& e)
     {
@@ -696,9 +698,11 @@ void Model<TF>::set_time_step()
 
 // Add all masks
 template<typename TF>
-void Model<TF>::add_statistics_masks()
+//void Model<TF>::add_statistics_masks()
+void Model<TF>::add_statistics_masks(Grid<TF>& grid,Input& input)
 {
     const std::vector<std::string>& mask_list = stats->get_mask_list();
+    auto& gd = grid.get_grid_data();
 
     // Check whether the mask can be retrieved from any of the mask-providing classes
     for (auto& mask_name : mask_list)
@@ -706,7 +710,42 @@ void Model<TF>::add_statistics_masks()
         if (mask_name == "default")
             stats->add_mask(mask_name);
         else if (fields->has_mask(mask_name))
+        {
+         if (mask_name == "subsample")
+         {
+          unsigned int flag=0;
+          std::vector<std::string> subslist   = input.get_list<std::string>("stats", "subslist", "", std::vector<std::string>());
+          for (std::vector<std::string>::const_iterator iis=subslist.begin(); iis!=subslist.end(); ++iis)
+          {
+           int nsi = (int)(gd.itot)/(std::stod(*iis));
+           int nsj = (int)(gd.jtot)/(std::stod(*iis));
+           for (int i=1; i<gd.itot; i=i+nsi)
+            {
+            for (int j=1; j<gd.jtot; j=j+nsj)
+             { 
+              std::stringstream maskname;
+              maskname<< mask_name+"_";
+              maskname<< std::setfill('0') << std::setw(3) << *iis;
+              maskname<< "_";
+              maskname<< std::setfill('0') << std::setw(3) << (int)i/nsi;
+              maskname<< "_";
+              maskname<< std::setfill('0') << std::setw(3) << (int)j/nsj;
+              stats->add_mask(maskname.str());
+              if(flag>0){
+               stats->set_flags(maskname.str(),flag);
+              }else{
+               flag=stats->get_flags(maskname.str())<<2;
+               stats->set_flags(maskname.str(),flag);
+              }
+             }
+            }
+           }
+         }
+         else
+         {
             stats->add_mask(mask_name);
+         }
+        }
         else if (thermo->has_mask(mask_name))
             stats->add_mask(mask_name);
         else if (microphys->has_mask(mask_name))

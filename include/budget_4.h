@@ -31,7 +31,7 @@ template<typename TF>
 class Budget_4 : public Budget<TF>
 {
     public:
-        Budget_4(Master&, Grid<TF>&, Fields<TF>&, Thermo<TF>&, Diff<TF>&, Advec<TF>&, Force<TF>&, Input&);
+        Budget_4(Master&, Grid<TF>&, Fields<TF>&, Thermo<TF>&, Microphys<TF>&, Diff<TF>&, Advec<TF>&, Force<TF>&, Input&);
         ~Budget_4();
 
         void init();
@@ -43,6 +43,7 @@ class Budget_4 : public Budget<TF>
         using Budget<TF>::grid;
         using Budget<TF>::fields;
         using Budget<TF>::thermo;
+        using Budget<TF>::microphys;
         using Budget<TF>::diff;
         using Budget<TF>::advec;
         using Budget<TF>::force;

@@ -31,6 +31,7 @@ class Master;
 template<typename> class Grid;
 template<typename> class Fields;
 template<typename> class Thermo;
+template<typename> class Microphys;
 template<typename> class Diff;
 template<typename> class Advec;
 template<typename> class Force;
@@ -46,13 +47,13 @@ class Budget
 {
     public:
         Budget(Master&, Grid<TF>&, Fields<TF>&,
-                Thermo<TF>&, Diff<TF>&, Advec<TF>&, Force<TF>&, Input&);
+                Thermo<TF>&,Microphys<TF>&, Diff<TF>&, Advec<TF>&, Force<TF>&, Input&);
 
         virtual ~Budget();
 
         static std::shared_ptr<Budget> factory(
                 Master&, Grid<TF>&, Fields<TF>&,
-                Thermo<TF>&, Diff<TF>&, Advec<TF>&, Force<TF>&, Stats<TF>&, Input&);
+                Thermo<TF>&, Microphys<TF>&, Diff<TF>&, Advec<TF>&, Force<TF>&, Stats<TF>&, Input&);
 
         virtual void init() = 0;
         virtual void create(Stats<TF>&) = 0;
@@ -63,6 +64,7 @@ class Budget
         Grid<TF>& grid;
         Fields<TF>& fields;
         Thermo<TF>& thermo;
+        Microphys<TF>& microphys;
         Diff<TF>& diff;
         Advec<TF>& advec;
         Force<TF>& force;

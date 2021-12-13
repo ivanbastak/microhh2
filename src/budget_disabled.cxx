@@ -25,8 +25,8 @@
 template<typename TF>
 Budget_disabled<TF>::Budget_disabled(
         Master& masterin, Grid<TF>& gridin, Fields<TF>& fieldsin,
-        Thermo<TF>& thermoin, Diff<TF>& diffin, Advec<TF>& advecin, Force<TF>& forcein, Input& inputin) :
-    Budget<TF>(masterin, gridin, fieldsin, thermoin, diffin, advecin, forcein, inputin)
+        Thermo<TF>& thermoin, Microphys <TF>& microphysin, Diff<TF>& diffin, Advec<TF>& advecin, Force<TF>& forcein, Input& inputin) :
+    Budget<TF>(masterin, gridin, fieldsin, thermoin, microphysin, diffin, advecin, forcein, inputin)
 {}
 
 template<typename TF>

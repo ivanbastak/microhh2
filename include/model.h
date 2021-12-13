@@ -120,6 +120,7 @@ class Model
         void prepare_gpu();
         void clear_gpu();
 
-        void add_statistics_masks();
+        //void add_statistics_masks();
+        void add_statistics_masks(Grid<TF>&,Input&);
 };
 #endif

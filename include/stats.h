@@ -105,8 +105,16 @@ class Stats
         void initialize_masks();
         void finalize_masks();
 
+        const unsigned int get_flags(const std::string);
+        void set_flags(const std::string,const unsigned int);
+
         const std::vector<std::string>& get_mask_list();
+        const std::vector<std::string>& get_subs_list();
         void set_mask_thres(std::string, Field3d<TF>&, Field3d<TF>&, TF, Stats_mask_type );
+        void set_mask_sub(std::string,   
+                const int ist, const int nsi, const int jst, const int nsj);
+        void set_mask_sub2(std::string,   
+                const int flag, const int flagh);
 
         void exec(const int, const double, const unsigned long);
 
@@ -145,6 +153,7 @@ class Stats
                 const std::pair<const std::string, Mask<TF>>&,
                 const Field3d<TF>&);
 
+
         void calc_stats(const std::string&, const Field3d<TF>&, const TF, const TF);
         void calc_stats_2d(const std::string&, const std::vector<TF>&, const TF);
         void calc_covariance(const std::string&, const Field3d<TF>&, const TF, const TF, const int,
@@ -180,6 +189,7 @@ class Stats
         // Container for all stats, masks as uppermost in hierarchy
         Mask_map<TF> masks;
         std::vector<std::string> masklist;
+        std::vector<std::string> subslist;
         std::vector<unsigned int> mfield;
         std::vector<unsigned int> mfield_bot;
 

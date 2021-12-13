@@ -31,6 +31,7 @@
 #include "fast_math.h"
 #include "model.h"
 #include "thermo.h"
+#include "microphys.h"
 #include "diff.h"
 #include "advec.h"
 #include "force.h"
@@ -1115,6 +1116,43 @@ namespace
     }
 
     /**
+     * Calculate the scalar budget terms arising from the microphysics terms
+     */
+    template<typename TF>
+    void calc_microphys_terms_scalar(
+            TF* const restrict s2_evap, TF* const restrict s2_accr,
+            TF* const restrict s2_auto,
+            const TF* const restrict s,
+            const TF* const restrict evap_s, const TF* const restrict accr_s,
+            const TF* const restrict auto_s, 
+            const TF* const restrict smean, 
+            const TF* const restrict evap_smean, const TF* const restrict accr_smean,
+            const TF* const restrict auto_smean,
+            const int istart, const int iend, const int jstart, const int jend, const int kstart, const int kend,
+            const int icells, const int ijcells)
+    {
+        const int jj = icells;
+        const int kk = ijcells;
+
+        #pragma omp parallel for
+        for (int k=kstart; k<kend; ++k)
+        {
+
+            for (int j=jstart; j<jend; ++j)
+                #pragma ivdep
+                for (int i=istart; i<iend; ++i)
+                {
+                    const int ijk = i + j*jj + k*kk;
+
+                    s2_evap[ijk] = - TF(2.) * (s[ijk] - smean[k]) * (evap_s[ijk] - evap_smean[k]);
+                    s2_accr[ijk] = - TF(2.) * (s[ijk] - smean[k]) * (accr_s[ijk] - accr_smean[k]);
+                    s2_auto[ijk] = - TF(2.) * (s[ijk] - smean[k]) * (auto_s[ijk] - auto_smean[k]);
+
+                }
+        }
+    }
+
+    /**
      * Calculate the scalar budget terms arising from the advection term
      */
     template<typename TF>
@@ -1122,7 +1160,7 @@ namespace
             TF* const restrict s2_shear, TF* const restrict s2_turb,
             TF* const restrict sw_shear, TF* const restrict sw_turb,
             const TF* const restrict w, const TF* const restrict s,
-            const TF* const restrict smean,
+            const TF* const restrict smean, const TF* const restrict wmean,
             const TF* const restrict dzi, const TF* const restrict dzhi,
             const int istart, const int iend, const int jstart, const int jend, const int kstart, const int kend,
             const int icells, const int ijcells)
@@ -1142,15 +1180,15 @@ namespace
                 {
                     const int ijk = i + j*jj + k*kk;
 
-                    s2_shear[ijk] = - TF(2.) * (s[ijk] - smean[k]) * interp2(w[ijk], w[ijk+kk]) * dsdz;
+                    s2_shear[ijk] = - TF(2.) * (s[ijk] - smean[k]) * interp2(w[ijk]-wmean[k], w[ijk+kk]-wmean[k+1]) * dsdz;
 
-                    s2_turb[ijk]  = - ((pow(interp2(s[ijk]-smean[k], s[ijk+kk]-smean[k+1]), 2) * w[ijk+kk]) -
-                                       (pow(interp2(s[ijk]-smean[k], s[ijk-kk]-smean[k-1]), 2) * w[ijk   ])) * dzi[k];
+                    s2_turb[ijk]  = - ((pow(interp2(s[ijk]-smean[k], s[ijk+kk]-smean[k+1]), 2) * (w[ijk+kk]-wmean[k+1])) -
+                                       (pow(interp2(s[ijk]-smean[k], s[ijk-kk]-smean[k-1]), 2) * (w[ijk   ]-wmean[k]))) * dzi[k];
 
-                    sw_shear[ijk] = - pow(w[ijk], 2) * dsdzh;
+                    sw_shear[ijk] = - pow(w[ijk]-wmean[k], 2) * dsdzh;
 
-                    sw_turb[ijk]  = - ((pow(interp2(w[ijk], w[ijk+kk]), 2) * (s[ijk   ]-smean[k  ]))-
-                                       (pow(interp2(w[ijk], w[ijk-kk]), 2) * (s[ijk-kk]-smean[k-1]))) * dzhi[k];
+                    sw_turb[ijk]  = - ((pow(interp2(w[ijk]-wmean[k], w[ijk+kk]-wmean[k+1]), 2) * (s[ijk   ]-smean[k  ]))-
+                                       (pow(interp2(w[ijk]-wmean[k], w[ijk-kk]-wmean[k-1]), 2) * (s[ijk-kk]-smean[k-1]))) * dzhi[k];
                 }
         }
     }
@@ -1164,7 +1202,7 @@ namespace
             TF* const restrict b2_visc, TF* const restrict b2_diss,
             TF* const restrict bw_visc, TF* const restrict bw_diss,
             const TF* const restrict w, const TF* const restrict b,
-            const TF* const restrict bmean,
+            const TF* const restrict bmean, const TF* const restrict wmean,
             const TF* const restrict dzi, const TF* const restrict dzhi,
             const TF dxi, const TF dyi, const TF visc, const TF diff,
             const int istart, const int iend, const int jstart, const int jend, const int kstart, const int kend,
@@ -1199,7 +1237,7 @@ namespace
             {
                 const int ijk = i + j*jj + k*kk;
                 // with w[kstart-1] undefined, use gradient w over lowest point
-                bw_diss[ijk] = TF(-2.) * visc * (w[ijk+kk]-w[ijk]) * dzi[k] * ((b[ijk]-bmean[k])-(b[ijk-kk]-bmean[k-1]))*dzhi[k];
+                bw_diss[ijk] = TF(-2.) * visc * ((w[ijk+kk]-wmean[k+1])-(w[ijk]-wmean[k])) * dzi[k] * ((b[ijk]-bmean[k])-(b[ijk-kk]-bmean[k-1]))*dzhi[k];
             }
 
         k = kend;
@@ -1208,7 +1246,7 @@ namespace
             for (int i=istart; i<iend; ++i)
             {
                 const int ijk = i + j*jj + k*kk;
-                bw_diss[ijk] = TF(-2.) * visc * (w[ijk]-w[ijk-kk]) * dzi[k-1] * ((b[ijk]-bmean[k])-(b[ijk-kk]-bmean[k-1]))*dzhi[k];
+                bw_diss[ijk] = TF(-2.) * visc * ((w[ijk]-wmean[k])-(w[ijk-kk]-wmean[k-1])) * dzi[k-1] * ((b[ijk]-bmean[k])-(b[ijk-kk]-bmean[k-1]))*dzhi[k];
             }
 
         #pragma omp parallel for
@@ -1219,19 +1257,19 @@ namespace
                 {
                     const int ijk = i + j*jj + k*kk;
 
-                    bw_visc[ijk] = visc * ( ( (w[ijk+kk] * interp2(b[ijk      ]-bmean[k  ], b[ijk+kk]-bmean[k+1])) -
-                                              (w[ijk   ] * interp2(b[ijk-kk   ]-bmean[k-1], b[ijk   ]-bmean[k  ])) ) * dzi[k  ] -
-                                            ( (w[ijk   ] * interp2(b[ijk-kk   ]-bmean[k-1], b[ijk   ]-bmean[k  ])) -
-                                              (w[ijk-kk] * interp2(b[ijk-kk-kk]-bmean[k-2], b[ijk-kk]-bmean[k-1])) ) * dzi[k-1] ) * dzhi[k];
+                    bw_visc[ijk] = visc * ( ( ((w[ijk+kk]-wmean[k+1]) * interp2(b[ijk      ]-bmean[k  ], b[ijk+kk]-bmean[k+1])) -
+                                              ((w[ijk   ]-wmean[k  ]) * interp2(b[ijk-kk   ]-bmean[k-1], b[ijk   ]-bmean[k  ])) ) * dzi[k  ] -
+                                            ( ((w[ijk   ]-wmean[k  ]) * interp2(b[ijk-kk   ]-bmean[k-1], b[ijk   ]-bmean[k  ])) -
+                                              ((w[ijk-kk]-wmean[k-1]) * interp2(b[ijk-kk-kk]-bmean[k-2], b[ijk-kk]-bmean[k-1])) ) * dzi[k-1] ) * dzhi[k];
 
                     bw_diss[ijk] = TF(-2.) * visc * (
-                                                (interp2(w[ijk+ii], w[ijk]) - interp2(w[ijk], w[ijk-ii])) * dxi *
+                                                (interp2(w[ijk+ii]-wmean[k+1], w[ijk]-wmean[k]) - interp2(w[ijk]-wmean[k], w[ijk-ii]-wmean[k-1])) * dxi *
                                                 (interp22(b[ijk]-bmean[k], b[ijk+ii]-bmean[k], b[ijk+ii-kk]-bmean[k-1],b[ijk-kk]-bmean[k-1]) -
                                                  interp22(b[ijk]-bmean[k], b[ijk-ii]-bmean[k], b[ijk-ii-kk]-bmean[k-1],b[ijk-kk]-bmean[k-1])) * dxi +
-                                                (interp2(w[ijk+jj], w[ijk]) - interp2(w[ijk], w[ijk-jj])) * dyi *
+                                                (interp2(w[ijk+jj]-wmean[k+1], w[ijk]-wmean[k]) - interp2(w[ijk]-wmean[k], w[ijk-jj]-wmean[k-1])) * dyi *
                                                 (interp22(b[ijk]-bmean[k], b[ijk+jj]-bmean[k], b[ijk+jj-kk]-bmean[k-1],b[ijk-kk]-bmean[k-1]) -
                                                  interp22(b[ijk]-bmean[k], b[ijk-jj]-bmean[k], b[ijk-jj-kk]-bmean[k-1],b[ijk-kk]-bmean[k-1])) * dyi +
-                                                (interp2(w[ijk+kk], w[ijk]) - interp2(w[ijk], w[ijk-kk])) * dzhi[k] *
+                                                (interp2(w[ijk+kk]-wmean[k+1], w[ijk]-wmean[k]) - interp2(w[ijk]-wmean[k], w[ijk-kk]-wmean[k-1])) * dzhi[k] *
                                                 ((b[ijk]-bmean[k])-(b[ijk-kk]-bmean[k-1]))*dzhi[k]
                                              );
                 }
@@ -1248,6 +1286,62 @@ namespace
                 bw_visc[ijk_start] = bw_visc[ijk_start+kk];
                 bw_visc[ijk_end  ] = bw_visc[ijk_end  -kk];
             }
+    }
+
+    /**
+     * Calculate the budget terms related to diffusion. In the approach here, we catch
+     * molecular diffusion (nu*d/dxj(dui^2/dxj)) and dissipation (-2*nu*(dui/dxj)^2) in a
+     * single term in order to ensure a closing budget.
+     */
+    template<typename TF>
+    void calc_diffusion_terms_scalar_les(
+            TF* const restrict s2_diff, 
+            const TF* const restrict s, 
+            const TF* const restrict evisc,
+            const TF* const restrict smean, 
+            const TF* const restrict dzi, const TF* const restrict dzhi,
+            const TF dxi, const TF dyi,
+            const int istart, const int iend, const int jstart, const int jend, const int kstart, const int kend,
+            const int icells, const int jcells, const int ijcells)
+    {
+        const int ii = 1;
+        const int ii2 = 2;
+        const int jj = icells;
+        const int jj2 = 2*icells;
+        const int kk = ijcells;
+        const int kk2 = 2*ijcells;
+        const TF inprt = 3.0; //inverse Prandtl number
+        // -----------------------------
+        // Test: directly calculate diffusion terms as 2 s * d/dxi(visc_s * ds/dxi)
+        // -----------------------------
+        #pragma omp parallel for
+        for (int k=kstart; k<kend; ++k)
+            for (int j=jstart; j<jend; ++j)
+                #pragma ivdep
+                for (int i=istart; i<iend; ++i)
+                {
+                    const int ijk = i + j*jj + k*kk;
+
+                    const TF evisc_stop   = inprt*interp2(evisc[ijk], evisc[ijk+kk]);
+                    const TF evisc_sbot   = inprt*interp2(evisc[ijk], evisc[ijk-kk]);
+                    const TF evisc_snorth = inprt*interp2(evisc[ijk], evisc[ijk+jj]);
+                    const TF evisc_ssouth = inprt*interp2(evisc[ijk], evisc[ijk-jj]);
+                    const TF evisc_seast  = inprt*interp2(evisc[ijk], evisc[ijk+ii]);
+                    const TF evisc_swest  = inprt*interp2(evisc[ijk], evisc[ijk-ii]);
+
+                    // -----------------------------------------
+                    // 2 * s * d/dx( visc_s * ds/dx)
+                    s2_diff[ijk]  = TF(2.) * (s[ijk]-smean[k]) * (evisc_seast * (s[ijk+ii] - s[ijk   ]) * dxi -
+                                                                  evisc_swest * (s[ijk   ] - s[ijk-ii]) * dxi ) * dxi;
+                    // -----------------------------------------
+                    // 2 * s * d/dy( visc_s * ds/dy)
+                    s2_diff[ijk] += TF(2.) * (s[ijk]-smean[k]) * (evisc_snorth * (s[ijk+jj] - s[ijk   ]) * dyi -
+                                                                  evisc_ssouth * (s[ijk   ] - s[ijk-jj]) * dyi ) * dyi;
+                    // -----------------------------------------
+                    // 2 * s * d/dz( visc_s * ds/dz)
+                    s2_diff[ijk] += TF(2.) * (s[ijk]-smean[k]) * (evisc_stop   * (s[ijk+kk] - s[ijk   ]) * dzhi[k+1] -
+                                                                  evisc_sbot   * (s[ijk   ] - s[ijk-kk]) * dzhi[k  ] ) * dzi[k];
+                }
     }
 
     /**
@@ -1281,8 +1375,8 @@ namespace
 template<typename TF>
 Budget_2<TF>::Budget_2(
         Master& masterin, Grid<TF>& gridin, Fields<TF>& fieldsin,
-        Thermo<TF>& thermoin, Diff<TF>& diffin, Advec<TF>& advecin, Force<TF>& forcein, Input& inputin) :
-    Budget<TF>(masterin, gridin, fieldsin, thermoin, diffin, advecin, forcein, inputin),
+        Thermo<TF>& thermoin, Microphys<TF>& microphysin, Diff<TF>& diffin, Advec<TF>& advecin, Force<TF>& forcein, Input& inputin) :
+    Budget<TF>(masterin, gridin, fieldsin, thermoin, microphysin, diffin, advecin, forcein, inputin),
     field3d_operators(masterin, gridin, fieldsin)
 {
     // The LES flux budget requires one additional ghost cell in the horizontal.
@@ -1408,6 +1502,46 @@ void Budget_2<TF>::create(Stats<TF>& stats)
         stats.add_prof("bw_rdstr", "Redistribution term in BW budget"     , "m2 s-4", "zh", group_name);
         stats.add_prof("bw_buoy" , "Buoyancy term in BW budget"           , "m2 s-4", "zh", group_name);
         stats.add_prof("bw_pres" , "Pressure transport term in BW budget" , "m2 s-4", "zh", group_name);
+
+        if (thermo.get_switch() == "moist" || thermo.get_switch() == "vapor"){
+          stats.add_prof("qt2_shear", "Shear production term in qt2 budget"   , "kg2 kg-2 s-1", "z", group_name);
+          stats.add_prof("qt2_turb" , "Turbulent transport term in qt2 budget", "kg2 kg-2 s-1", "z", group_name);
+          stats.add_prof("qtw_shear", "Shear production term in qtw budget"   , "kg kg-1 m s-2", "z", group_name);
+          stats.add_prof("qtw_turb" , "Turbulent transport term in qtw budget", "kg1 kg-1 m s-2", "z", group_name);
+          stats.add_prof("thl2_shear", "Shear production term in thl2 budget"   , "K2 s-1", "z", group_name);
+          stats.add_prof("thl2_turb" , "Turbulent transport term in thl2 budget", "K2 s-1", "z", group_name);
+          stats.add_prof("thlw_shear", "Shear production term in thlw budget"   , "K m s-2", "z", group_name);
+          stats.add_prof("thlw_turb" , "Turbulent transport term in thlw budget", "K m s-2", "z", group_name);
+          if (diff.get_switch() != Diffusion_type::Disabled)
+          {
+           if (diff.get_switch() == Diffusion_type::Diff_2 || diff.get_switch() == Diffusion_type::Diff_4)
+           {
+            stats.add_prof("qt2_visc" , "Viscous transport term in qt2 budget", "kg2 kg-2 s-1", "z" , group_name);
+            stats.add_prof("qt2_diss" , "Dissipation term in qt2 budget"      , "kg2 kg-2 s-1", "z" , group_name);
+            stats.add_prof("qtw_visc" , "Viscous transport term in qtw budget", "kg kg-1 m s-2", "z" , group_name);
+            stats.add_prof("qtw_diss" , "Dissipation term in qtw budget"      , "kg kg-1 m s-2", "z" , group_name);
+            stats.add_prof("thl2_visc" , "Viscous transport term in thl2 budget", "K2 s-1", "z" , group_name);
+            stats.add_prof("thl2_diss" , "Dissipation term in thl2 budget"      , "K2 s-1", "z" , group_name);
+            stats.add_prof("thlw_visc" , "Viscous transport term in thlw budget", "K m s-2", "z" , group_name);
+            stats.add_prof("thlw_diss" , "Dissipation term in thlw budget"      , "K m s-2", "z" , group_name);
+           }
+           // For LES, add only the total diffusive budget terms, which (unlike diss + visc) close
+           else if (diff.get_switch() == Diffusion_type::Diff_smag2)
+           {
+            stats.add_prof("qt2_diff"  , "Total diffusive term in qt2 budget"     , "kg2 kg-2 s-1", "z" , group_name);
+            stats.add_prof("thl2_diff" , "Total diffusive term in thl2 budget"    , "K2 s-1", "z" , group_name);
+           }
+          }
+
+          if (microphys.get_switch() == Microphys_type::Warm_2mom){
+            stats.add_prof("qt2_evap", "Evaporation tendency in qt2 budget"   , "kg2 kg-2 s-1", "z", group_name);
+            stats.add_prof("qt2_auto", "Autoconversion tendency in qt2 budget"   , "kg2 kg-2 s-1", "z", group_name);
+            stats.add_prof("qt2_accr", "Accretion tendency in qt2 budget"   , "kg2 kg-2 s-1", "z", group_name);
+            stats.add_prof("thl2_evap", "Evaporation tendency in thl2 budget"   , "K2 s-1", "z", group_name);
+            stats.add_prof("thl2_auto", "Autoconversion tendency in thl2 budget"   , "K2 s-1", "z", group_name);
+            stats.add_prof("thl2_accr", "Accretion tendency in thl2 budget"   , "K2 s-1", "z", group_name);
+          }
+        }
     }
 }
 
@@ -1696,6 +1830,7 @@ void Budget_2<TF>::exec_stats(Stats<TF>& stats)
             // Get the buoyancy diffusivity from the thermo class
             const TF diff_b = thermo.get_buoyancy_diffusivity();
 
+
             // Acquire the buoyancy, cyclic=true, is_stat=true.
             auto b = fields.get_tmp();
             thermo.get_thermo_field(*b, "b", true, true);
@@ -1752,7 +1887,7 @@ void Budget_2<TF>::exec_stats(Stats<TF>& stats)
                         b2_shear->fld.data(), b2_turb->fld.data(),
                         bw_shear->fld.data(), bw_turb->fld.data(),
                         fields.mp.at("w")->fld.data(), b->fld.data(),
-                        b->fld_mean.data(),
+                        b->fld_mean.data(),wmodel.data(),
                         gd.dzi.data(), gd.dzhi.data(),
                         gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend,
                         gd.icells, gd.ijcells);
@@ -1779,7 +1914,7 @@ void Budget_2<TF>::exec_stats(Stats<TF>& stats)
                         b2_visc->fld.data(), b2_diss->fld.data(),
                         bw_visc->fld.data(), bw_diss->fld.data(),
                         fields.mp.at("w")->fld.data(), b->fld.data(),
-                        b->fld_mean.data(),
+                        b->fld_mean.data(),wmodel.data(),
                         gd.dzi.data(), gd.dzhi.data(),
                         gd.dxi, gd.dyi, fields.visc, diff_b,
                         gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend,
@@ -1813,6 +1948,196 @@ void Budget_2<TF>::exec_stats(Stats<TF>& stats)
             fields.release_tmp(bw_pres);
             fields.release_tmp(bw_rdstr);
             fields.release_tmp(b);
+
+            //compute budget terms fro qt2 and thl2
+            if (thermo.get_switch() == "moist" || thermo.get_switch() == "vapor"){
+             const TF diff_thl = fields.sp.at("thl")->visc;
+             const TF diff_qt = fields.sp.at("qt")->visc;
+             if (advec.get_switch() != Advection_type::Disabled)
+             {
+                  auto qt2_shear = fields.get_tmp();
+                  auto qt2_turb = fields.get_tmp();
+                  auto qtw_shear = fields.get_tmp();
+                  auto qtw_turb = fields.get_tmp();
+                  auto thl2_shear = fields.get_tmp();
+                  auto thl2_turb = fields.get_tmp();
+                  auto thlw_shear = fields.get_tmp();
+                  auto thlw_turb = fields.get_tmp();
+
+                  calc_advection_terms_scalar(
+                          qt2_shear->fld.data(), qt2_turb->fld.data(),
+                          qtw_shear->fld.data(), qtw_turb->fld.data(),
+                          fields.mp.at("w")->fld.data(), fields.sp.at("qt")->fld.data(),
+                          fields.sp.at("qt")->fld_mean.data(),wmodel.data(),
+                          gd.dzi.data(), gd.dzhi.data(),
+                          gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend,
+                          gd.icells, gd.ijcells);
+
+                  calc_advection_terms_scalar(
+                          thl2_shear->fld.data(), thl2_turb->fld.data(),
+                          thlw_shear->fld.data(), thlw_turb->fld.data(),
+                          fields.mp.at("w")->fld.data(), fields.sp.at("thl")->fld.data(),
+                          fields.sp.at("thl")->fld_mean.data(),wmodel.data(),
+                          gd.dzi.data(), gd.dzhi.data(),
+                          gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend,
+                          gd.icells, gd.ijcells);
+
+                  stats.calc_mask_stats(m, "qt2_shear" , *qt2_shear, no_offset, no_threshold);
+                  stats.calc_mask_stats(m, "qt2_turb"  , *qt2_turb , no_offset, no_threshold);
+                  stats.calc_mask_stats(m, "qtw_shear" , *qtw_shear, no_offset, no_threshold);
+                  stats.calc_mask_stats(m, "qtw_turb"  , *qtw_turb , no_offset, no_threshold);
+                  stats.calc_mask_stats(m, "thl2_shear", *thl2_shear, no_offset, no_threshold);
+                  stats.calc_mask_stats(m, "thl2_turb" , *thl2_turb , no_offset, no_threshold);
+                  stats.calc_mask_stats(m, "thlw_shear", *thlw_shear, no_offset, no_threshold);
+                  stats.calc_mask_stats(m, "thlw_turb" , *thlw_turb , no_offset, no_threshold);
+
+                  fields.release_tmp(qt2_shear);
+                  fields.release_tmp(qt2_turb );
+                  fields.release_tmp(qtw_shear);
+                  fields.release_tmp(qtw_turb );
+                  fields.release_tmp(thl2_shear);
+                  fields.release_tmp(thl2_turb );
+                  fields.release_tmp(thlw_shear);
+                  fields.release_tmp(thlw_turb );
+             }
+
+             if (diff.get_switch() == Diffusion_type::Diff_2 || diff.get_switch() == Diffusion_type::Diff_4)
+             {
+                 auto qt2_visc = fields.get_tmp();
+                 auto qt2_diss = fields.get_tmp();
+                 auto qtw_visc = fields.get_tmp();
+                 auto qtw_diss = fields.get_tmp();
+                 auto thl2_visc = fields.get_tmp();
+                 auto thl2_diss = fields.get_tmp();
+                 auto thlw_visc = fields.get_tmp();
+                 auto thlw_diss = fields.get_tmp();
+
+                 calc_diffusion_terms_scalar_dns(
+                         qt2_visc->fld.data(), qt2_diss->fld.data(),
+                         qtw_visc->fld.data(), qtw_diss->fld.data(),
+                         fields.mp.at("w")->fld.data(), fields.sp.at("qt")->fld.data(),
+                         fields.sp.at("qt")->fld_mean.data(), wmodel.data(),
+                         gd.dzi.data(), gd.dzhi.data(),
+                         gd.dxi, gd.dyi, fields.visc, diff_qt,
+                         gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend,
+                         gd.icells, gd.ijcells);
+
+                 calc_diffusion_terms_scalar_dns(
+                         thl2_visc->fld.data(), thl2_diss->fld.data(),
+                         thlw_visc->fld.data(), thlw_diss->fld.data(),
+                         fields.mp.at("w")->fld.data(), fields.sp.at("thl")->fld.data(),
+                         fields.sp.at("thl")->fld_mean.data(), wmodel.data(),
+                         gd.dzi.data(), gd.dzhi.data(),
+                         gd.dxi, gd.dyi, fields.visc, diff_thl,
+                         gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend,
+                         gd.icells, gd.ijcells);
+
+                 stats.calc_mask_stats(m, "qt2_visc", *qt2_visc, no_offset, no_threshold);
+                 stats.calc_mask_stats(m, "qt2_diss", *qt2_diss, no_offset, no_threshold);
+                 stats.calc_mask_stats(m, "qtw_visc", *qtw_visc, no_offset, no_threshold);
+                 stats.calc_mask_stats(m, "qtw_diss", *qtw_diss, no_offset, no_threshold);
+                 stats.calc_mask_stats(m, "thl2_visc", *thl2_visc, no_offset, no_threshold);
+                 stats.calc_mask_stats(m, "thl2_diss", *thl2_diss, no_offset, no_threshold);
+                 stats.calc_mask_stats(m, "thlw_visc", *thlw_visc, no_offset, no_threshold);
+                 stats.calc_mask_stats(m, "thlw_diss", *thlw_diss, no_offset, no_threshold);
+
+                 fields.release_tmp(qt2_visc);
+                 fields.release_tmp(qt2_diss);
+                 fields.release_tmp(qtw_visc);
+                 fields.release_tmp(qtw_diss);
+                 fields.release_tmp(thl2_visc);
+                 fields.release_tmp(thl2_diss);
+                 fields.release_tmp(thlw_visc);
+                 fields.release_tmp(thlw_diss);
+             }
+             else if (diff.get_switch() == Diffusion_type::Diff_smag2)
+             {
+                auto qt2_diff = fields.get_tmp();
+                auto thl2_diff = fields.get_tmp();
+
+                calc_diffusion_terms_scalar_les(
+                      qt2_diff->fld.data(),
+                      fields.sp.at("qt")->fld.data(),
+                      fields.sd.at("evisc")->fld.data(),
+                      fields.sp.at("qt")->fld_mean.data(),
+                      gd.dzi.data(), gd.dzhi.data(),
+                      gd.dxi, gd.dyi,
+                      gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend,
+                      gd.icells, gd.jcells, gd.ijcells);
+
+                calc_diffusion_terms_scalar_les(
+                      thl2_diff->fld.data(),
+                      fields.sp.at("thl")->fld.data(),
+                      fields.sd.at("evisc")->fld.data(),
+                      fields.sp.at("thl")->fld_mean.data(),
+                      gd.dzi.data(), gd.dzhi.data(),
+                      gd.dxi, gd.dyi,
+                      gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend,
+                      gd.icells, gd.jcells, gd.ijcells);
+
+                stats.calc_mask_stats(m, "qt2_diff" , *qt2_diff  , no_offset, no_threshold);
+                stats.calc_mask_stats(m, "thl_diff" , *thl2_diff , no_offset, no_threshold);
+
+                fields.release_tmp(qt2_diff);
+                fields.release_tmp(thl2_diff);
+              }
+
+             if (microphys.get_switch() == Microphys_type::Warm_2mom){
+              //microphysical terms
+              auto qt2_evap = fields.get_tmp();
+              auto qt2_accr = fields.get_tmp();
+              auto qt2_auto = fields.get_tmp();
+              auto thl2_evap = fields.get_tmp();
+              auto thl2_accr = fields.get_tmp();
+              auto thl2_auto = fields.get_tmp();
+              // Calculate the mean of the fields.
+              field3d_operators.calc_mean_profile(fields.sd.at("evap_qtt")->fld_mean.data(), fields.sd.at("evap_qtt")->fld.data());
+              field3d_operators.calc_mean_profile(fields.sd.at("auto_qtt")->fld_mean.data(), fields.sd.at("auto_qtt")->fld.data());
+              field3d_operators.calc_mean_profile(fields.sd.at("accr_qtt")->fld_mean.data(), fields.sd.at("accr_qtt")->fld.data());
+              field3d_operators.calc_mean_profile(fields.sd.at("evap_thlt")->fld_mean.data(), fields.sd.at("evap_thlt")->fld.data());
+              field3d_operators.calc_mean_profile(fields.sd.at("auto_thlt")->fld_mean.data(), fields.sd.at("auto_thlt")->fld.data());
+              field3d_operators.calc_mean_profile(fields.sd.at("accr_thlt")->fld_mean.data(), fields.sd.at("accr_thlt")->fld.data());
+
+              calc_microphys_terms_scalar(
+                    qt2_evap->fld.data(), qt2_accr->fld.data(),
+                    qt2_auto->fld.data(),
+                    fields.sp.at("qt")->fld.data(),
+                    fields.sd.at("evap_qtt")->fld.data(), fields.sd.at("accr_qtt")->fld.data(),
+                    fields.sd.at("auto_qtt")->fld.data(), 
+                    fields.sp.at("qt")->fld_mean.data(),
+                    fields.sd.at("evap_qtt")->fld_mean.data(), fields.sd.at("accr_qtt")->fld_mean.data(),
+                    fields.sd.at("auto_qtt")->fld_mean.data(),
+                    gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend,
+                    gd.icells, gd.ijcells);
+
+              calc_microphys_terms_scalar(
+                    thl2_evap->fld.data(), thl2_accr->fld.data(),
+                    thl2_auto->fld.data(),
+                    fields.sp.at("thl")->fld.data(),
+                    fields.sd.at("evap_thlt")->fld.data(), fields.sd.at("accr_thlt")->fld.data(),
+                    fields.sd.at("auto_thlt")->fld.data(), 
+                    fields.sp.at("thl")->fld_mean.data(),
+                    fields.sd.at("evap_thlt")->fld_mean.data(), fields.sd.at("accr_thlt")->fld_mean.data(),
+                    fields.sd.at("auto_thlt")->fld_mean.data(),
+                    gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend,
+                    gd.icells, gd.ijcells);
+
+              stats.calc_mask_stats(m, "qt2_evap", *qt2_evap, no_offset, no_threshold);
+              stats.calc_mask_stats(m, "qt2_accr", *qt2_accr, no_offset, no_threshold);
+              stats.calc_mask_stats(m, "qt2_auto", *qt2_auto, no_offset, no_threshold);
+              stats.calc_mask_stats(m, "thl2_evap", *thl2_evap, no_offset, no_threshold);
+              stats.calc_mask_stats(m, "thl2_accr", *thl2_accr, no_offset, no_threshold);
+              stats.calc_mask_stats(m, "thl2_auto", *thl2_auto, no_offset, no_threshold);
+
+              fields.release_tmp(qt2_evap);
+              fields.release_tmp(qt2_accr);
+              fields.release_tmp(qt2_auto);
+              fields.release_tmp(thl2_evap);
+              fields.release_tmp(thl2_accr);
+              fields.release_tmp(thl2_auto);
+             }
+            }
+
         }
     }
 }

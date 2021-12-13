@@ -279,7 +279,8 @@ Fields<TF>::Fields(Master& masterin, Grid<TF>& gridin, Input& input) :
     n_tmp_fields = 4;
 
     // Specify the masks that fields can provide / calculate
-    available_masks.insert(available_masks.end(), {"default", "wplus", "wmin"});
+    available_masks.insert(available_masks.end(), {"default", "wplus", "wmin","subsample"});
+    //available_masks.insert(available_masks.end(), {"default", "wplus", "wmin"});
 }
 
 template<typename TF>
@@ -506,10 +507,15 @@ void Fields<TF>::get_mask(Stats<TF>& stats, std::string mask_name)
 
     // Calculate masks
     const TF threshold = 0;
+    std::smatch match;
+    const std::regex regex("subsample_(\\d{3})_(\\d{3})_(\\d{3})");
     if (mask_name == "wplus")
         stats.set_mask_thres(mask_name, *mp.at("w"), *wf, threshold, Stats_mask_type::Plus);
     else if (mask_name == "wmin")
         stats.set_mask_thres(mask_name, *mp.at("w"), *wf, threshold, Stats_mask_type::Min);
+    //else if (std::regex_match(mask_name, match, regex)) {
+    //    stats.set_mask_sub(mask_name);
+    //    }
 
     release_tmp(wf);
 }
@@ -1067,8 +1073,14 @@ void Fields<TF>::exec_column(Column<TF>& column)
 template<typename TF>
 bool Fields<TF>::has_mask(std::string mask_name)
 {
+    std::smatch match;
+    const std::regex regex("subsample_(\\d{3})_(\\d{3})_(\\d{3})");
+
     if (std::find(available_masks.begin(), available_masks.end(), mask_name) != available_masks.end())
         return true;
+    else if (std::regex_match(mask_name, match, regex)) {
+         return true;
+    }
     else
         return false;
 }
